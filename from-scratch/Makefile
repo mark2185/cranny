@@ -31,17 +31,22 @@ uninstall:
 	adb uninstall com.manual.apk
 
 CC = ${NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi30-clang
-CFLAGS += -ffunction-sections -Os -fdata-sections -Wall -fvisibility=hidden -fPIC -m32 -landroid -llog
+CFLAGS += -ffunction-sections -Os -fdata-sections -Wall -fvisibility=hidden -fPIC -m32 -landroid -lcranny-zig -llog
 LDFLAGS += -Wl,--gc-sections -Wl,-Map=${BUILD_DIR}/output.map -shared
 
 # the library *has* to be in lib/{arch}/ in the APK file
 # otherwise it fails to install with an "INSTALL_FAILED_NO_MATCHING_ABIS: Failed to extract native libraries, res=-113]" error
-${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so: cranny.c
+${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so: cranny.c ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}-zig.so
 	mkdir -p ${BUILD_DIR}/lib/armeabi-v7a
-	$(CC) $(CFLAGS) $^ -o ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so \
+	$(CC) $(CFLAGS) $^ -o $@ \
 		-L${NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/${API_LEVEL} \
+		-L${BUILD_DIR}/lib/armeabi-v7a \
 		${NDK}/sources/android/native_app_glue/android_native_app_glue.c \
 		${LDFLAGS}
+
+${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}-zig.so: cranny.zig
+	mkdir -p ${BUILD_DIR}/lib/armeabi-v7a
+	zig build-lib $^ -target arm-linux-androideabi -fPIE -rdynamic -femit-bin=$@
 
 KEYSTORE_FILE = my-key.keystore
 DNAME = "CN=example.com, OU=ID, O=Example, L=Doe, S=John, C=GB"
@@ -49,7 +54,7 @@ ${KEYSTORE_FILE}:
 	mkdir -p build
 	keytool -genkey -v -keystore ${KEYSTORE_FILE} -alias mykey -keyalg RSA -keysize 2048 -validity 10000 -storepass password -keypass password -dname ${DNAME}
 
-${BUILD_DIR}/${APKFILE}: ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so AndroidManifest.xml ${KEYSTORE_FILE}
+${BUILD_DIR}/${APKFILE}: ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}-zig.so AndroidManifest.xml ${KEYSTORE_FILE}
 	mkdir -p ${BUILD_DIR}
 	
 	@# -v = verbose
@@ -59,7 +64,7 @@ ${BUILD_DIR}/${APKFILE}: ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so AndroidMa
 	@# -F = output file
 	${AAPT} package -v -I ${ANDROID_JAR} -M AndroidManifest.xml -f -F ${BUILD_DIR}/temp.apk 
 	
-	cd ${BUILD_DIR} && zip temp.apk -D lib/armeabi-v7a/lib${APPNAME}.so
+	cd ${BUILD_DIR} && zip temp.apk -D lib/armeabi-v7a/*.so
 	
 	@# zipalign gets angry if the apk already exists
 	@rm -f ${BUILD_DIR}/${APKFILE}
