@@ -48,7 +48,12 @@ ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}-zig.o: cranny.zig
 	mkdir -p ${BUILD_DIR}/lib/armeabi-v7a
 	@# ReleaseSmall is needed to avoid R_ARM_TLS_DESC and R_ARM_TLS_LE32 errors
 	@# (I have no idea what those are, but it's TLS and ARM specific)
-	zig build-obj $^ -target arm-linux-androideabi -fPIC -femit-bin=$@ -O ReleaseSmall
+	zig build-obj $^ \
+		-I${NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include \
+		-target arm-linux-androideabi \
+		-fPIC \
+		-O ReleaseSmall \
+		-femit-bin=$@
 
 KEYSTORE_FILE = my-key.keystore
 DNAME = "CN=example.com, OU=ID, O=Example, L=Doe, S=John, C=GB"
