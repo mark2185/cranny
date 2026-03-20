@@ -31,12 +31,12 @@ uninstall:
 	adb uninstall com.manual.apk
 
 CC = ${NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi30-clang
-CFLAGS += -ffunction-sections -Os -fdata-sections -Wall -fvisibility=hidden -fPIC -m32 -landroid -lcranny-zig -llog
+CFLAGS += -ffunction-sections -Os -fdata-sections -Wall -fvisibility=hidden -fPIC -m32 -landroid -llog
 LDFLAGS += -Wl,--gc-sections -Wl,-Map=${BUILD_DIR}/output.map -shared
 
 # the library *has* to be in lib/{arch}/ in the APK file
 # otherwise it fails to install with an "INSTALL_FAILED_NO_MATCHING_ABIS: Failed to extract native libraries, res=-113]" error
-${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so: cranny.c ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}-zig.so
+${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so: cranny.c ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}-zig.o
 	mkdir -p ${BUILD_DIR}/lib/armeabi-v7a
 	$(CC) $(CFLAGS) $^ -o $@ \
 		-L${NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/${API_LEVEL} \
@@ -44,9 +44,11 @@ ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so: cranny.c ${BUILD_DIR}/lib/armeabi
 		${NDK}/sources/android/native_app_glue/android_native_app_glue.c \
 		${LDFLAGS}
 
-${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}-zig.so: cranny.zig
+${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}-zig.o: cranny.zig
 	mkdir -p ${BUILD_DIR}/lib/armeabi-v7a
-	zig build-lib $^ -target arm-linux-androideabi -fPIE -rdynamic -femit-bin=$@
+	@# ReleaseSmall is needed to avoid R_ARM_TLS_DESC and R_ARM_TLS_LE32 errors
+	@# (I have no idea what those are, but it's TLS and ARM specific)
+	zig build-obj $^ -target arm-linux-androideabi -fPIC -femit-bin=$@ -O ReleaseSmall
 
 KEYSTORE_FILE = my-key.keystore
 DNAME = "CN=example.com, OU=ID, O=Example, L=Doe, S=John, C=GB"
@@ -54,7 +56,7 @@ ${KEYSTORE_FILE}:
 	mkdir -p build
 	keytool -genkey -v -keystore ${KEYSTORE_FILE} -alias mykey -keyalg RSA -keysize 2048 -validity 10000 -storepass password -keypass password -dname ${DNAME}
 
-${BUILD_DIR}/${APKFILE}: ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}-zig.so AndroidManifest.xml ${KEYSTORE_FILE}
+${BUILD_DIR}/${APKFILE}: ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}-zig.o AndroidManifest.xml ${KEYSTORE_FILE}
 	mkdir -p ${BUILD_DIR}
 	
 	@# -v = verbose

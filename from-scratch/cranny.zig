@@ -17,4 +17,15 @@ fn logI(tag: [*c]const u8, text: [*c]const u8) void {
 
 export fn zig_main() callconv(.c) void {
     _ = __android_log_write(4, "MANUAL_TAG_ZIG", "Hello from zig_main!");
+
+    const address = std.net.Address.parseIp4("127.0.0.1", 7979) catch {
+        logI("MANUAL_TAG_ZIG", "Could not parse IPv4");
+        return;
+    };
+
+    var server = address.listen(.{}) catch {
+        logI("MANUAL_TAG_ZIG", "Error listening!");
+        return;
+    };
+    defer server.deinit();
 }
