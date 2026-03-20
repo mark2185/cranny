@@ -3,6 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     xmlns:android="http://schemas.android.com/apk/res/android" package="com.manual.apk">
     <uses-sdk android:minSdkVersion="19" android:targetSdkVersion="25"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:hasCode="false"
         android:label="Cranny">
