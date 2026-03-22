@@ -31,29 +31,46 @@ uninstall:
 	adb uninstall com.manual.apk
 
 CC = ${NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi30-clang
-CFLAGS += -ffunction-sections -Os -fdata-sections -Wall -fvisibility=hidden -fPIC -m32 -landroid -llog
-LDFLAGS += -Wl,--gc-sections -Wl,-Map=${BUILD_DIR}/output.map -shared
+CFLAGS += -ffunction-sections -Os -fdata-sections -Wall -fvisibility=hidden -fPIC -m32
+LDFLAGS += -Wl,--gc-sections -Wl,-Map=${BUILD_DIR}/output.map -shared -landroid -llog 
 
+# ~~~ Target using android_native_app_glue code ~~~
+#
 # the library *has* to be in lib/{arch}/ in the APK file
 # otherwise it fails to install with an "INSTALL_FAILED_NO_MATCHING_ABIS: Failed to extract native libraries, res=-113]" error
-${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so: cranny.c ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}-zig.o
-	mkdir -p ${BUILD_DIR}/lib/armeabi-v7a
-	$(CC) $(CFLAGS) $^ -o $@ \
-		-L${NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/${API_LEVEL} \
-		-L${BUILD_DIR}/lib/armeabi-v7a \
-		${NDK}/sources/android/native_app_glue/android_native_app_glue.c \
-		${LDFLAGS}
+# https://developer.android.com/ndk/guides/abis#native-code-in-app-packages
+# ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so: cranny.c ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}-zig.o
+# 	mkdir -p ${BUILD_DIR}/lib/armeabi-v7a
+# 	$(CC) $(CFLAGS) $^ -o $@ \
+# 		-L${NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/${API_LEVEL} \
+# 		-L${BUILD_DIR}/lib/armeabi-v7a \
+# 		-I${NDK}/sources/ \
+# 		${NDK}/sources/android/native_app_glue/android_native_app_glue.c \
+# 		${LDFLAGS}
 
-${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}-zig.o: cranny.zig
+# ~~~ Target without using android_native_app_glue code ~~~
+# ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so: cranny.c
+# 	mkdir -p ${BUILD_DIR}/lib/armeabi-v7a
+# 	$(CC) $^ -o $@ -shared -llog -fvisibility=hidden \
+# 		-I${NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include \
+# 		-L${NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/${API_LEVEL}
+
+${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so: cranny.zig
 	mkdir -p ${BUILD_DIR}/lib/armeabi-v7a
+	
 	@# ReleaseSmall is needed to avoid R_ARM_TLS_DESC and R_ARM_TLS_LE32 errors
 	@# (I have no idea what those are, but it's TLS and ARM specific)
-	zig build-obj $^ \
+	zig build-lib $^ \
 		-I${NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include \
 		-target arm-linux-androideabi \
+		-dynamic -rdynamic \
 		-fPIC \
 		-O ReleaseSmall \
+		-fno-strip \
+ 		--library-directory ${NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/26 \
+		-llog \
 		-femit-bin=$@
+
 
 KEYSTORE_FILE = my-key.keystore
 DNAME = "CN=example.com, OU=ID, O=Example, L=Doe, S=John, C=GB"
@@ -61,7 +78,7 @@ ${KEYSTORE_FILE}:
 	mkdir -p build
 	keytool -genkey -v -keystore ${KEYSTORE_FILE} -alias mykey -keyalg RSA -keysize 2048 -validity 10000 -storepass password -keypass password -dname ${DNAME}
 
-${BUILD_DIR}/${APKFILE}: ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}-zig.o AndroidManifest.xml ${KEYSTORE_FILE}
+${BUILD_DIR}/${APKFILE}: ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so AndroidManifest.xml ${KEYSTORE_FILE}
 	mkdir -p ${BUILD_DIR}
 	
 	@# -v = verbose
