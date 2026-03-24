@@ -32,7 +32,7 @@ uninstall:
 
 CC = ${NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi30-clang
 CFLAGS += -ffunction-sections -Os -fdata-sections -Wall -fvisibility=hidden -fPIC -m32
-LDFLAGS += -Wl,--gc-sections -Wl,-Map=${BUILD_DIR}/output.map -shared -landroid -llog 
+LDFLAGS += -Wl,--gc-sections -Wl,-Map=${BUILD_DIR}/output.map -shared -landroid -llog
 
 # ~~~ Target using android_native_app_glue code ~~~
 #
@@ -57,18 +57,21 @@ LDFLAGS += -Wl,--gc-sections -Wl,-Map=${BUILD_DIR}/output.map -shared -landroid 
 
 ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so: cranny.zig
 	mkdir -p ${BUILD_DIR}/lib/armeabi-v7a
-	
+
 	@# ReleaseSmall is needed to avoid R_ARM_TLS_DESC and R_ARM_TLS_LE32 errors
 	@# (I have no idea what those are, but it's TLS and ARM specific)
 	zig build-lib $^ \
+		-freference-trace=10 \
 		-I${NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include \
 		-target arm-linux-androideabi \
 		-dynamic -rdynamic \
 		-fPIC \
 		-O ReleaseSmall \
 		-fno-strip \
- 		--library-directory ${NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/26 \
-		-llog \
+		--library-directory ${NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/26 \
+		--libc libc.txt \
+		--dynamic-linker /opt/android-sdk/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/bin/ld.lld \
+		-lc -llog -landroid \
 		-femit-bin=$@
 
 
@@ -78,20 +81,20 @@ ${KEYSTORE_FILE}:
 	mkdir -p build
 	keytool -genkey -v -keystore ${KEYSTORE_FILE} -alias mykey -keyalg RSA -keysize 2048 -validity 10000 -storepass password -keypass password -dname ${DNAME}
 
-${BUILD_DIR}/${APKFILE}: ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so AndroidManifest.xml ${KEYSTORE_FILE}
+${BUILD_DIR}/${APKFILE}: AndroidManifest.xml ${KEYSTORE_FILE} ${BUILD_DIR}/lib/armeabi-v7a/lib${APPNAME}.so
 	mkdir -p ${BUILD_DIR}
-	
+
 	@# -v = verbose
 	@# -I = add an existing package to base include set
 	@# -M = path to the AndroidManifest.xml
 	@# -f = force overwriting files
 	@# -F = output file
-	${AAPT} package -v -I ${ANDROID_JAR} -M AndroidManifest.xml -f -F ${BUILD_DIR}/temp.apk 
-	
-	cd ${BUILD_DIR} && zip temp.apk -D lib/armeabi-v7a/*.so
-	
+	${AAPT} package -v -I ${ANDROID_JAR} -M AndroidManifest.xml -f -F ${BUILD_DIR}/temp.apk
+
+	cd ${BUILD_DIR} && zip temp.apk -D lib/*/*.so
+
 	@# zipalign gets angry if the apk already exists
 	@rm -f ${BUILD_DIR}/${APKFILE}
 	${ZIPALIGN} -v 4 ${BUILD_DIR}/temp.apk ${BUILD_DIR}/${APKFILE}
-	
+
 	${BUILD_TOOLS}/apksigner sign --key-pass pass:password --ks-pass pass:password --ks ${KEYSTORE_FILE} ${BUILD_DIR}/${APKFILE}
