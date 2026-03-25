@@ -28,7 +28,11 @@ var http_thread: ?std.Thread = null;
 
 var server_running = false;
 
-fn runServer() void {
+fn runServer(storage: []const u8) void {
+    var buffer: [1024]u8 = undefined;
+    var fba: std.heap.FixedBufferAllocator = .init(&buffer);
+    const allocator = fba.allocator();
+
     LOGI("+runServer()");
     defer LOGI("-runServer()");
 
@@ -43,14 +47,14 @@ fn runServer() void {
     };
     defer server.deinit();
     while (server_running) {
-        handleConnection(server.accept() catch |err| {
+        handleConnection(allocator, server.accept() catch |err| {
             switch (err) {
                 // No connection was made which means the call to accept would block
                 error.WouldBlock => continue,
                 else => LOGI("Uh-oh, an actual error occurred!"),
             }
             return;
-        }) catch {
+        }, storage) catch {
             LOGI("Error handling a connection!");
             return;
         };
@@ -58,32 +62,14 @@ fn runServer() void {
     }
 }
 
-fn onStart(_: [*c]native_activity.ANativeActivity) callconv(.c) void {
+fn onStart(activity: [*c]native_activity.ANativeActivity) callconv(.c) void {
     LOGI("+onStart()");
     defer LOGI("-onStart()");
-    // LOGI("Incrementing the number in the file test.txt");
-
-    // const file_path = "/storage/emulated/0/Android/data/com.manual.apk/files/test.txt";
-
-    // create it if it doesn't exist
-    // var file = std.fs.createFileAbsolute(file_path, .{ .truncate = false, .read = true }) catch |err| {
-    // LOGI(@errorName(err));
-    // LOGI("Early return!");
-    // return;
-    // };
-    // defer file.close();
-
-    // read it and increment it
-    // var buffer: [1024]u8 = @splat(0);
-    // var reader = file.reader(&buffer);
-    // var data_slices = [1][]u8{&buffer};
-    // const read_bytes = reader.interface.readVec(&data_slices) catch 0;
-    // LOGFI("Read bytes: %d", read_bytes);
 
     if (http_thread == null) {
         LOGI("Spawning a thread!");
         server_running = true;
-        http_thread = std.Thread.spawn(.{}, runServer, .{}) catch {
+        http_thread = std.Thread.spawn(.{}, runServer, .{std.mem.span(activity.*.externalDataPath)}) catch {
             LOGI("Could not spawn a thread");
             return;
         };
@@ -101,7 +87,7 @@ fn onStop(_: [*c]native_activity.ANativeActivity) callconv(.c) void {
     }
 }
 
-fn handleConnection(conn: std.net.Server.Connection) !void {
+fn handleConnection(allocator: std.mem.Allocator, conn: std.net.Server.Connection, storage: []const u8) !void {
     defer conn.stream.close();
 
     var recv_buffer: [1024]u8 = undefined;
@@ -111,14 +97,35 @@ fn handleConnection(conn: std.net.Server.Connection) !void {
     var connection_bw = conn.stream.writer(&send_buffer);
 
     var server = std.http.Server.init(connection_br.interface(), &connection_bw.interface);
-    const request = server.receiveHead() catch {
+    var request = server.receiveHead() catch {
         LOGI("Unable to receive head from the HTTP request");
         return;
     };
 
     switch (request.head.method) {
-        .GET => LOGI("Got a GET request!"),
-        .POST => LOGI("Got a POST request!"),
+        .GET => {
+            LOGI("Got a GET request!");
+            if (std.mem.eql(u8, request.head.target, "/list")) {
+                var response = request.respondStreaming(&.{}, .{}) catch unreachable;
+                var dir = std.fs.cwd().openDir(storage, .{ .iterate = true }) catch unreachable;
+                defer dir.close();
+
+                var it = dir.iterate();
+                while (it.next() catch unreachable) |file| {
+                    response.writer.writeAll(file.name) catch unreachable;
+                    response.writer.writeAll("\n") catch unreachable;
+                }
+                response.endChunked(.{}) catch unreachable;
+            }
+        },
+        .POST => {
+            LOGI("Got a POST request!");
+            if (std.mem.eql(u8, request.head.target, "/upload")) {
+                // head strings expire here
+                const body = try (try request.readerExpectContinue(&.{})).allocRemaining(allocator, .unlimited);
+                defer allocator.free(body);
+            }
+        },
         else => LOGI("Got something else"),
     }
 }
