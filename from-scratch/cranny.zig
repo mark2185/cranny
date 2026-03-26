@@ -87,7 +87,7 @@ fn onStop(_: [*c]native_activity.ANativeActivity) callconv(.c) void {
     }
 }
 
-fn handleConnection(allocator: std.mem.Allocator, conn: std.net.Server.Connection, storage: []const u8) !void {
+fn handleConnection(_: std.mem.Allocator, conn: std.net.Server.Connection, storage: []const u8) !void {
     defer conn.stream.close();
 
     var recv_buffer: [1024]u8 = undefined;
@@ -97,8 +97,9 @@ fn handleConnection(allocator: std.mem.Allocator, conn: std.net.Server.Connectio
     var connection_bw = conn.stream.writer(&send_buffer);
 
     var server = std.http.Server.init(connection_br.interface(), &connection_bw.interface);
-    var request = server.receiveHead() catch {
+    var request = server.receiveHead() catch |err| {
         LOGI("Unable to receive head from the HTTP request");
+        LOGI(@errorName(err));
         return;
     };
 
@@ -121,9 +122,19 @@ fn handleConnection(allocator: std.mem.Allocator, conn: std.net.Server.Connectio
         .POST => {
             LOGI("Got a POST request!");
             if (std.mem.eql(u8, request.head.target, "/upload")) {
-                // head strings expire here
-                const body = try (try request.readerExpectContinue(&.{})).allocRemaining(allocator, .unlimited);
-                defer allocator.free(body);
+                const content_length = blk: {
+                    var it = request.iterateHeaders();
+                    while (it.next()) |h| {
+                        if (std.mem.eql(u8, "Content-Length", h.name)) {
+                            break :blk std.fmt.parseInt(u16, h.value, 10) catch unreachable;
+                        }
+                    }
+                    break :blk 0;
+                };
+
+                LOGFI("Content length: %d", content_length);
+
+                request.respond("bye", .{}) catch unreachable;
             }
         },
         else => LOGI("Got something else"),

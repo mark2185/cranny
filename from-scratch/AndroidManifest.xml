@@ -7,8 +7,9 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
     <application
+        android:label="Cranny"
         android:hasCode="false"
-        android:label="Cranny">
+        android:debuggable="true">
         <activity
             android:label="Cranny"
             android:name="android.app.NativeActivity"
