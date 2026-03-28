@@ -29,10 +29,6 @@ var http_thread: ?std.Thread = null;
 var server_running = false;
 
 fn runServer(storage: []const u8) void {
-    var buffer: [1024]u8 = undefined;
-    var fba: std.heap.FixedBufferAllocator = .init(&buffer);
-    const allocator = fba.allocator();
-
     LOGI("+runServer()");
     defer LOGI("-runServer()");
 
@@ -47,7 +43,7 @@ fn runServer(storage: []const u8) void {
     };
     defer server.deinit();
     while (server_running) {
-        handleConnection(allocator, server.accept() catch |err| {
+        handleConnection(server.accept() catch |err| {
             switch (err) {
                 // No connection was made which means the call to accept would block
                 error.WouldBlock => continue,
@@ -58,36 +54,10 @@ fn runServer(storage: []const u8) void {
             LOGI("Error handling a connection!");
             return;
         };
-        LOGI("Connection successful!");
     }
 }
 
-fn onStart(activity: [*c]native_activity.ANativeActivity) callconv(.c) void {
-    LOGI("+onStart()");
-    defer LOGI("-onStart()");
-
-    if (http_thread == null) {
-        LOGI("Spawning a thread!");
-        server_running = true;
-        http_thread = std.Thread.spawn(.{}, runServer, .{std.mem.span(activity.*.externalDataPath)}) catch {
-            LOGI("Could not spawn a thread");
-            return;
-        };
-    }
-}
-
-fn onStop(_: [*c]native_activity.ANativeActivity) callconv(.c) void {
-    LOGI("+onStop()");
-    defer LOGI("-onStop()");
-    if (http_thread) |t| {
-        server_running = false;
-        t.join();
-        LOGI("HTTP server thread joined");
-        http_thread = null;
-    }
-}
-
-fn handleConnection(_: std.mem.Allocator, conn: std.net.Server.Connection, storage: []const u8) !void {
+fn handleConnection(conn: std.net.Server.Connection, storage: []const u8) !void {
     defer conn.stream.close();
 
     var recv_buffer: [1024]u8 = undefined;
@@ -134,10 +104,68 @@ fn handleConnection(_: std.mem.Allocator, conn: std.net.Server.Connection, stora
 
                 LOGFI("Content length: %d", content_length);
 
-                request.respond("bye", .{}) catch unreachable;
+                // head strings expire here
+                var write_buffer: [1024]u8 = undefined;
+                var read_buffer: [1024]u8 = undefined;
+                // var fba = std.heap.FixedBufferAllocator.init(&write_buffer);
+                // const allocator = fba.allocator();
+
+                var dir = std.fs.cwd().openDir(storage, .{}) catch unreachable;
+                defer dir.close();
+
+                LOGFI("Storage: %s", @as([*c]const u8, @ptrCast(storage)));
+                var file = dir.createFile("test-file.txt", .{ .truncate = true }) catch {
+                    LOGI("Could not open file for writing!");
+                    return;
+                };
+                defer file.close();
+
+                var file_writer = file.writerStreaming(&write_buffer);
+
+                const body = request.readerExpectNone(&read_buffer);
+                LOGI("Starting streaming!");
+                body.streamExact(&file_writer.interface, 1024) catch {
+                    LOGI("Stream remaining failed");
+                    return;
+                };
+
+                // LOGFI("Bytes streamed: %d", bytes_streamed);
+                // body.streamRemaining(
+                //.allocRemaining(allocator, .limited(buffer.len)) catch {
+                // LOGI("Failed to alloc remaining");
+                // return;
+                // };
+                // defer allocator.free(body);
+
+                request.respond("bye\n", .{}) catch unreachable;
+                LOGI("Request processed!");
             }
         },
         else => LOGI("Got something else"),
+    }
+}
+
+fn onStart(activity: [*c]native_activity.ANativeActivity) callconv(.c) void {
+    LOGI("+onStart()");
+    defer LOGI("-onStart()");
+
+    if (http_thread == null) {
+        server_running = true;
+        http_thread = std.Thread.spawn(.{}, runServer, .{std.mem.span(activity.*.externalDataPath)}) catch {
+            LOGI("Could not spawn a thread");
+            return;
+        };
+    }
+}
+
+fn onStop(_: [*c]native_activity.ANativeActivity) callconv(.c) void {
+    LOGI("+onStop()");
+    defer LOGI("-onStop()");
+    if (http_thread) |t| {
+        server_running = false;
+        t.join();
+        LOGI("HTTP server thread joined");
+        http_thread = null;
     }
 }
 
@@ -147,14 +175,4 @@ export fn ANativeActivity_onCreate(activity: [*c]native_activity.ANativeActivity
     LOGI("Hello from ANativeActivity_onCreate!");
     activity.*.callbacks.*.onStart = onStart;
     activity.*.callbacks.*.onStop = onStop;
-
-    // while (true) {
-    // var event: *AInputEvent = undefined;
-    // if (q) {
-    // LOGI("input queue is a nullptr");
-    // } else if (input.AInputQueue_hasEvents(q) == 1) {
-    // LOGI("An event has been logged!");
-    // }
-    // }
-    LOGI("Goodbye from ANativeActivity_onCreate!");
 }

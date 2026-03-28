@@ -1,7 +1,14 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) !void {
-    const target = b.standardTargetOptions(.{ .default_target = .{ .cpu_arch = .arm, .os_tag = .linux, .abi = .androideabi, .dynamic_linker = .init("/opt/android-sdk/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/bin/ld.lld") } });
+    const target = b.standardTargetOptions(.{
+        .default_target = .{
+            .cpu_arch = .arm,
+            .os_tag = .linux,
+            .abi = .androideabi,
+            //.dynamic_linker = .init("/opt/android-sdk/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/bin/ld.lld")
+        },
+    });
 
     const optimize = std.builtin.OptimizeMode.ReleaseSmall;
 
