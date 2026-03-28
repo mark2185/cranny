@@ -57,6 +57,19 @@ fn runServer(storage: []const u8) void {
     }
 }
 
+fn getFilename(content_disposition: []const u8) ![]const u8 {
+    if (!std.mem.containsAtLeast(u8, content_disposition, 1, "filename=")) {
+        return (error{FilenameNotFound}).FilenameNotFound;
+    }
+    var it = std.mem.splitScalar(u8, content_disposition, ';');
+    while (it.next()) |field| {
+        if (std.mem.startsWith(u8, std.mem.trim(u8, field, " \t\n\r"), "filename=")) {
+            return std.mem.trim(u8, field["filename=".len..], " =\"");
+        }
+    }
+    unreachable;
+}
+
 fn handleConnection(conn: std.net.Server.Connection, storage: []const u8) !void {
     defer conn.stream.close();
 
@@ -91,55 +104,78 @@ fn handleConnection(conn: std.net.Server.Connection, storage: []const u8) !void 
         },
         .POST => {
             LOGI("Got a POST request!");
-            if (std.mem.eql(u8, request.head.target, "/upload")) {
-                const content_length = blk: {
-                    var it = request.iterateHeaders();
-                    while (it.next()) |h| {
-                        if (std.mem.eql(u8, "Content-Length", h.name)) {
-                            break :blk std.fmt.parseInt(u16, h.value, 10) catch unreachable;
-                        }
-                    }
-                    break :blk 0;
-                };
-
-                LOGFI("Content length: %d", content_length);
-
-                // head strings expire here
-                var write_buffer: [1024]u8 = undefined;
-                var read_buffer: [1024]u8 = undefined;
-                // var fba = std.heap.FixedBufferAllocator.init(&write_buffer);
-                // const allocator = fba.allocator();
-
-                var dir = std.fs.cwd().openDir(storage, .{}) catch unreachable;
-                defer dir.close();
-
-                LOGFI("Storage: %s", @as([*c]const u8, @ptrCast(storage)));
-                var file = dir.createFile("test-file.txt", .{ .truncate = true }) catch {
-                    LOGI("Could not open file for writing!");
-                    return;
-                };
-                defer file.close();
-
-                var file_writer = file.writerStreaming(&write_buffer);
-
-                const body = request.readerExpectNone(&read_buffer);
-                LOGI("Starting streaming!");
-                body.streamExact(&file_writer.interface, 1024) catch {
-                    LOGI("Stream remaining failed");
-                    return;
-                };
-
-                // LOGFI("Bytes streamed: %d", bytes_streamed);
-                // body.streamRemaining(
-                //.allocRemaining(allocator, .limited(buffer.len)) catch {
-                // LOGI("Failed to alloc remaining");
-                // return;
-                // };
-                // defer allocator.free(body);
-
-                request.respond("bye\n", .{}) catch unreachable;
-                LOGI("Request processed!");
+            if (!std.mem.eql(u8, request.head.target, "/upload")) {
+                LOGI("Not an upload request!");
+                return;
             }
+
+            const content_length = blk: {
+                var it = request.iterateHeaders();
+                while (it.next()) |h| {
+                    if (std.mem.eql(u8, "Content-Length", h.name)) {
+                        break :blk std.fmt.parseInt(u16, h.value, 10) catch unreachable;
+                    }
+                }
+                break :blk 0;
+            };
+            // LOGFI("Content length: %d", request.head.content_length.?);
+            LOGFI("Content length: %d", content_length);
+
+            var yab: [2048]u8 = undefined;
+            var reader = request.readerExpectContinue(&yab) catch {
+                // std.debug.print("Reader expect continue failed: {any}\n", .{err});
+                return;
+            };
+
+            // the body should begin with the following lines:
+            // <boundary>\r\n
+            // Content-Disposition\r\n
+            // Content-Type\r\n
+            // \r\n
+            const boundary = reader.takeDelimiterExclusive('\r') catch {
+                LOGI("Cannot take delimiter");
+                return;
+            };
+            _ = reader.discard(.limited(2)) catch { // \r\n
+                LOGI("Cannot take '\\r\\n'");
+                return;
+            };
+            const content_disposition = reader.takeDelimiterExclusive('\r') catch unreachable;
+            _ = reader.discard(.limited(2)) catch { // \r\n
+                LOGI("Cannot take '\\r\\n'");
+                return;
+            };
+            _ = reader.takeDelimiterExclusive('\r') catch unreachable;
+            _ = reader.discard(.limited(4)) catch { // \r\n\r\n
+                LOGI("Cannot take '\\r\\n'");
+                return;
+            };
+
+            var dir = std.fs.cwd().openDir(storage, .{}) catch unreachable;
+            defer dir.close();
+
+            const filename = getFilename(content_disposition) catch unreachable;
+            var file = dir.createFile(filename, .{}) catch {
+                LOGI("Could not open file for writing!");
+                return;
+            };
+            defer file.close();
+
+            var file_buffer: [2048]u8 = undefined;
+            const exact = content_length - reader.seek - (boundary.len + 6); // the ending boundary has two dashes extra
+            LOGFI("Exact: %d", exact);
+            var file_writer = file.writer(&file_buffer);
+            LOGFI("Gotten file writer");
+            reader.streamExact64(&file_writer.interface, exact) catch {
+                LOGI("naniiiiiiiii\n");
+            };
+
+            LOGI("Flushing!");
+            file_writer.interface.flush() catch unreachable;
+
+            request.respond("bye\n", .{}) catch unreachable;
+            LOGI("Request processed!");
+            LOGFI("File %s created!", @as([*c]const u8, @ptrCast(storage)));
         },
         else => LOGI("Got something else"),
     }
@@ -169,10 +205,7 @@ fn onStop(_: [*c]native_activity.ANativeActivity) callconv(.c) void {
     }
 }
 
-var q: *input.AInputQueue = undefined;
-
 export fn ANativeActivity_onCreate(activity: [*c]native_activity.ANativeActivity, _: *anyopaque, _: usize) void {
-    LOGI("Hello from ANativeActivity_onCreate!");
     activity.*.callbacks.*.onStart = onStart;
     activity.*.callbacks.*.onStop = onStop;
 }
