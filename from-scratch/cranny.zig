@@ -1,5 +1,5 @@
 const std = @import("std");
-const log = @cImport({
+const android_log = @cImport({
     @cInclude("android/log.h");
 });
 
@@ -11,14 +11,14 @@ const input = @cImport({
 });
 
 fn LOGI(text: [*c]const u8) void {
-    _ = log.__android_log_write(4, "MANUAL_TAG_ZIG", text);
+    _ = android_log.__android_log_write(4, "MANUAL_TAG_ZIG", text);
 }
 
 fn LOGFI(text: [*c]const u8, ...) callconv(.c) void {
     var ap = @cVaStart();
     defer @cVaEnd(&ap);
 
-    _ = log.__android_log_print(4, "MANUAL_TAG_ZIG", text, @cVaArg(&ap, [*c]const u8));
+    _ = android_log.__android_log_print(4, "MANUAL_TAG_ZIG", text, @cVaArg(&ap, [*c]const u8));
 }
 
 const ANativeWindow = extern struct {};
@@ -205,7 +205,16 @@ fn onStop(_: [*c]native_activity.ANativeActivity) callconv(.c) void {
     }
 }
 
-export fn ANativeActivity_onCreate(activity: [*c]native_activity.ANativeActivity, _: *anyopaque, _: usize) void {
+comptime {
+    @export(&simple_http_transfer_experiment, .{ .name = "ANativeActivity_onCreate" });
+}
+
+fn zig_entrypoint(activity: [*c]native_activity.ANativeActivity, _: *anyopaque, _: usize) callconv(.c) void {
     activity.*.callbacks.*.onStart = onStart;
     activity.*.callbacks.*.onStop = onStop;
 }
+
+fn simple_http_transfer_experiment(_: [*c]native_activity.ANativeActivity, _: *anyopaque, _: usize) callconv(.c) void {
+    LOGI("Hello world!");
+}
+

@@ -1,19 +1,19 @@
 const std = @import("std");
 
+const armv7 = true;
+
 pub fn build(b: *std.Build) !void {
+    const ndk_version = "16.1.4479499";
     const target = b.standardTargetOptions(.{
         .default_target = .{
-            .cpu_arch = .arm,
+            .cpu_arch = if (armv7) .arm else .aarch64,
             .os_tag = .linux,
-            .abi = .androideabi,
+            .abi = if (armv7) .androideabi else .android,
             //.dynamic_linker = .init("/opt/android-sdk/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/bin/ld.lld")
         },
     });
 
     const optimize = std.builtin.OptimizeMode.ReleaseSmall;
-
-    // TODO: why does dlopen fail for a debug build
-    // const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSmall });
 
     const lib = b.createModule(.{
         .root_source_file = b.path("cranny.zig"),
@@ -25,10 +25,10 @@ pub fn build(b: *std.Build) !void {
     });
 
     lib.addLibraryPath(std.Build.LazyPath{
-        .cwd_relative = "/opt/android-sdk/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/26",
+        .cwd_relative = "/opt/android-sdk/ndk/" ++ ndk_version ++ "/platforms/android-19/arch-arm/usr/lib",
     });
 
-    lib.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/opt/android-sdk/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include" });
+    lib.addIncludePath(std.Build.LazyPath{ .cwd_relative = "/opt/android-sdk/ndk/" ++ ndk_version ++ "/sysroot/usr/include" });
 
     lib.linkSystemLibrary("log", .{});
     lib.linkSystemLibrary("android", .{});
@@ -40,7 +40,7 @@ pub fn build(b: *std.Build) !void {
     });
     libcranny.rdynamic = true;
 
-    libcranny.libc_file = b.path("libc.txt");
+    libcranny.libc_file = b.path(if (armv7) "libc.txt" else "libc-armv8.txt");
 
     b.getInstallStep().dependOn(&b.addInstallArtifact(libcranny, .{
         .dest_dir = .{ .override = .{ .custom = "lib/armeabi-v7a" } },
