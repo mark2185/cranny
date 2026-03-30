@@ -15,8 +15,10 @@ pub fn build(b: *std.Build) !void {
 
     const optimize = std.builtin.OptimizeMode.ReleaseSmall;
 
+    const src = "cranny";
+
     const lib = b.createModule(.{
-        .root_source_file = b.path("cranny.zig"),
+        .root_source_file = b.path(src ++ ".zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
@@ -34,7 +36,7 @@ pub fn build(b: *std.Build) !void {
     lib.linkSystemLibrary("android", .{});
 
     const libcranny = b.addLibrary(.{
-        .name = "cranny",
+        .name = src,
         .linkage = .dynamic,
         .root_module = lib,
     });
