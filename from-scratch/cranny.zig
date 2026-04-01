@@ -64,6 +64,7 @@ fn runServer(storage: []const u8) void {
     };
     defer server.deinit();
 
+    LOGI("Waiting for connection...");
     handleConnection(server.accept() catch |err| {
         LOGI("Could not accept connection");
         LOGI(@errorName(err));
