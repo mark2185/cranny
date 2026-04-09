@@ -21,7 +21,7 @@ fn buildLib(b: *std.Build, target: std.Build.ResolvedTarget, comptime name: []co
     const module = b.createModule(.{
         .root_source_file = b.path(name ++ ".zig"),
         .target = target,
-        // TODO: has to be like this because of TLS on ARM, investigate
+        // TODO: has to be ReleaseSmall this because of TLS on ARM, investigate
         .optimize = std.builtin.OptimizeMode.ReleaseSmall,
         .link_libc = true,
         .pic = true,
@@ -66,6 +66,10 @@ pub fn build(b: *std.Build) !void {
     const libcranny = buildLib(b, target, "cranny");
     const libcranny_install = b.addInstallArtifact(libcranny, install_options);
 
+    const libcheck = buildLib(b, target, "cranny");
+    const check = b.step("check", "Step for zls build-on-save feature");
+    check.dependOn(&libcheck.step);
+
     // entrypoint is used for manual dlopen of libcranny to get the error message
     const libentrypoint = buildLib(b, target, "entrypoint");
     const libentrypoint_install = b.addInstallArtifact(libentrypoint, install_options);
@@ -101,6 +105,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     package_apk.step.dependOn(&libcranny_install.step);
+    package_apk.step.dependOn(&libentrypoint_install.step);
 
     // -=-=-=- Zipping -=-=-=-
     const zip_libs = b.addSystemCommand(&.{
@@ -136,8 +141,6 @@ pub fn build(b: *std.Build) !void {
     const install_apk = b.addSystemCommand(&.{ adb_path, "install", "-r", "zig-out/" ++ apk_name });
     install_apk.step.dependOn(&sign_apk.step);
 
-    const uninstall_app = b.addSystemCommand(&.{ adb_path, "uninstall", pkg_name });
-
     const run_app = b.addSystemCommand(&.{
         adb_path, "shell", "am", "start", pkg_name ++ "/android.app.NativeActivity",
     });
@@ -150,6 +153,7 @@ pub fn build(b: *std.Build) !void {
     const run_step = b.step("run", "Run app");
     run_step.dependOn(&run_app.step);
 
-    b.getUninstallStep().dependOn(&uninstall_app.step);
+    const uninstall_step = b.step("uninstall-app", "Uninstall app");
+    uninstall_step.dependOn(&b.addSystemCommand(&.{ adb_path, "uninstall", pkg_name }).step);
     // zig fmt: on
 }

@@ -21,9 +21,6 @@ fn LOGFI(text: [*c]const u8, ...) callconv(.c) void {
     _ = android_log.__android_log_print(4, "MANUAL_TAG_ZIG", text, @cVaArg(&ap, [*c]const u8));
 }
 
-const ANativeWindow = extern struct {};
-const ARect = extern struct {};
-
 var http_thread: ?std.Thread = null;
 
 var server_running = false;
@@ -52,20 +49,23 @@ fn runServer(storage: []const u8) void {
     LOGI("+runServer()");
     defer LOGI("-runServer()");
 
-    const address = std.net.Address.parseIp4("0.0.0.0", 7979) catch {
+    const address = std.Io.net.IpAddress.parseIp4("0.0.0.0", 7979) catch {
         LOGI("Could not parse IPv4");
         return;
     };
 
-    var server = address.listen(.{}) catch |err| {
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    defer threaded.deinit();
+
+    var server = address.listen(threaded.io(), .{ .reuse_address = true }) catch |err| {
         LOGI("Error listening on the address!");
         LOGI(@errorName(err));
         return;
     };
-    defer server.deinit();
+    defer server.deinit(threaded.io());
 
     LOGI("Waiting for connection...");
-    handleConnection(server.accept() catch |err| {
+    handleConnection(threaded.io(), server.accept(threaded.io()) catch |err| {
         LOGI("Could not accept connection");
         LOGI(@errorName(err));
         return;
@@ -100,16 +100,16 @@ fn getFilename(content_disposition: []const u8) ![]const u8 {
     unreachable;
 }
 
-fn handleConnection(conn: std.net.Server.Connection, storage: []const u8) void {
-    defer conn.stream.close();
+fn handleConnection(io: std.Io, stream: std.Io.net.Stream, storage: []const u8) void {
+    defer stream.close(io);
 
     var recv_buffer: [4096]u8 = undefined;
     var send_buffer: [4096]u8 = undefined;
 
-    var connection_br = conn.stream.reader(&recv_buffer);
-    var connection_bw = conn.stream.writer(&send_buffer);
+    var connection_br = stream.reader(io, &recv_buffer);
+    var connection_bw = stream.writer(io, &send_buffer);
 
-    var server = std.http.Server.init(connection_br.interface(), &connection_bw.interface);
+    var server = std.http.Server.init(&connection_br.interface, &connection_bw.interface);
     var request = server.receiveHead() catch |err| {
         LOGI("Unable to receive head from the HTTP request");
         LOGI(@errorName(err));
@@ -122,11 +122,11 @@ fn handleConnection(conn: std.net.Server.Connection, storage: []const u8) void {
             if (std.mem.eql(u8, request.head.target, "/list")) {
                 var response = request.respondStreaming(&.{}, .{}) catch unreachable;
                 response.writer.writeAll("Bookshelf:\n") catch unreachable;
-                var dir = std.fs.cwd().openDir(storage, .{ .iterate = true }) catch unreachable;
-                defer dir.close();
+                var dir = std.Io.Dir.cwd().openDir(io, storage, .{ .iterate = true }) catch unreachable;
+                defer dir.close(io);
 
                 var it = dir.iterate();
-                while (it.next() catch unreachable) |file| {
+                while (it.next(io) catch unreachable) |file| {
                     response.writer.writeAll(file.name) catch unreachable;
                     response.writer.writeAll("\n") catch unreachable;
                 }
@@ -152,11 +152,11 @@ fn handleConnection(conn: std.net.Server.Connection, storage: []const u8) void {
             LOGFI("Content length from the header: %d", request.head.content_length.?);
             LOGFI("Content length: %d", content_length);
 
-            var yab: [4096]u8 = undefined;
-            var reader = request.readerExpectNone(&yab); //catch {
-            // std.debug.print("Reader expect continue failed: {any}\n", .{err});
-            // return;
-            // };
+            // var yab: [4096]u8 = undefined;
+            var reader = request.readerExpectContinue(&.{}) catch {
+                LOGI("Reader expect continue failed!");
+                return;
+            };
 
             // the body is structured as such:
             // <boundary>\r\n
@@ -183,26 +183,26 @@ fn handleConnection(conn: std.net.Server.Connection, storage: []const u8) void {
                 return;
             };
 
-            var dir = std.fs.cwd().openDir(storage, .{}) catch unreachable;
-            defer dir.close();
+            var dir = std.Io.Dir.cwd().openDir(io, storage, .{}) catch unreachable;
+            defer dir.close(io);
 
             const filename = getFilename(content_disposition) catch unreachable;
-            var file = dir.createFile(filename, .{}) catch {
+            var file = dir.createFile(io, filename, .{}) catch {
                 LOGI("Could not open file for writing!");
                 return;
             };
-            defer file.close();
+            defer file.close(io);
 
-            var str_buf: [64]u8 = @splat(0);
-            @memcpy(&str_buf, filename);
-            str_buf[filename.len] = 0;
-            LOGFI("Filename: %s", &str_buf);
+            // var str_buf: [64]u8 = @splat(0);
+            // @memcpy(&str_buf, filename);
+            // str_buf[filename.len] = 0;
+            // LOGFI("Filename: %s", &str_buf);
 
-            // var file_buffer: [2048]u8 = undefined;
+            var file_buffer: [2048]u8 = undefined;
             // const exact: usize = content_length - reader.seek - (boundary.len + 6); // the ending boundary has two dashes extra
-            const exact: usize = 1500;
-            LOGFI("Exact: %d", exact);
-            var file_writer = file.writer(&.{});
+            // const exact: usize = 1500;
+            // LOGFI("Exact: %d", exact);
+            var file_writer = file.writer(io, &file_buffer);
             LOGFI("Gotten file writer");
             // reader.streamExact(&file_writer.interface, exact) catch {
             // LOGI("naniiiiiiiii\n");
@@ -216,7 +216,7 @@ fn handleConnection(conn: std.net.Server.Connection, storage: []const u8) void {
                     LOGI("Stream exact failed");
                     break;
                 };
-                LOGI("Flushing!");
+                LOGFI("Flushing %d bytes!", file_writer.interface.end);
                 file_writer.interface.flush() catch unreachable;
             }
 
