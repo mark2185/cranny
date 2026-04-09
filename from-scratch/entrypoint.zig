@@ -18,14 +18,18 @@ const native_activity = @cImport({
     @cInclude("android/native_activity.h");
 });
 
+const std = @import("std");
+
 fn entrypoint(_: [*c]native_activity.ANativeActivity, _: *anyopaque, _: usize) callconv(.c) void {
-    LOGI("Hello world!");
-    defer LOGI("Goodbye world!");
-    _ = dlfcn.dlopen("/data/app-lib/com.manual.apk-1/libcranny.so", dlfcn.RTLD_NOW);
-    const err = dlfcn.dlerror();
-    if (err == null) {
-        LOGI("No error was found!");
-    } else {
-        LOGI(err);
+    LOGI("+entrypoint()");
+    defer LOGI("-entrypoint()");
+
+    const locations: []const [*c]const u8 = &.{ "/data/app-lib/com.manual.apk-1/libcranny.so", "/data/app-lib/com.manual.apk-2/libcranny.so" };
+    for (locations) |loc| {
+        _ = dlfcn.dlopen(loc, dlfcn.RTLD_NOW);
+        const err = dlfcn.dlerror();
+        if (err != null) {
+            LOGI(err);
+        }
     }
 }
