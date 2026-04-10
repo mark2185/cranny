@@ -1,6 +1,5 @@
 const std = @import("std");
 
-const app_name = "cranny";
 const pkg_name = "com.manual.apk";
 
 const android_sdk_path = "/opt/android-sdk";
@@ -15,64 +14,83 @@ const ndk_path = android_sdk_path ++ "/ndk/" ++ ndk_version;
 const api_level = "19";
 const android_jar_path = android_sdk_path ++ "/platforms/android-" ++ api_level ++ "/android.jar";
 
-const apk_name = app_name ++ ".apk";
+const apk_name = "cranny.apk";
 
-fn buildLib(b: *std.Build, target: std.Build.ResolvedTarget, comptime name: []const u8) *std.Build.Step.Compile {
-    const module = b.createModule(.{
-        .root_source_file = b.path(name ++ ".zig"),
-        .target = target,
-        // TODO: has to be ReleaseSmall this because of TLS on ARM, investigate
-        .optimize = std.builtin.OptimizeMode.ReleaseSmall,
+pub fn build(b: *std.Build) !void {
+    const android_module = b.createModule(.{
+        .root_source_file = b.path("cranny-no-std.zig"),
+        .target = b.resolveTargetQuery(.{ .cpu_arch = .arm, .os_tag = .linux, .abi = .androideabi }),
+        .optimize = .ReleaseSmall,
         .link_libc = true,
         .pic = true,
         .strip = false,
     });
 
-    module.addLibraryPath(std.Build.LazyPath{
+    android_module.addLibraryPath(std.Build.LazyPath{
         .cwd_relative = std.fmt.comptimePrint("{s}/platforms/android-{s}/arch-arm/usr/lib", .{ ndk_path, api_level }),
     });
 
-    module.addIncludePath(std.Build.LazyPath{ .cwd_relative = ndk_path ++ "/sysroot/usr/include" });
+    android_module.addIncludePath(std.Build.LazyPath{ .cwd_relative = ndk_path ++ "/sysroot/usr/include" });
 
-    module.linkSystemLibrary("log", .{});
-    module.linkSystemLibrary("android", .{});
+    android_module.linkSystemLibrary("log", .{});
+    android_module.linkSystemLibrary("android", .{});
 
-    const lib = b.addLibrary(.{
-        .name = name,
+    const libcranny = b.addLibrary(.{
+        .name = "cranny",
         .linkage = .dynamic,
-        .root_module = module,
+        .root_module = android_module,
+        // .use_llvm = true,
     });
-    lib.libc_file = b.path(libc_path);
-
-    // TODO: investigate
-    //lib.rdynamic = true;
-
-    return lib;
-}
-
-pub fn build(b: *std.Build) !void {
-    const target = b.standardTargetOptions(.{
-        .default_target = .{
-            .cpu_arch = .arm,
-            .os_tag = .linux,
-            .abi = .androideabi,
-            // TODO: investigate
-            //.dynamic_linker = .init("/opt/android-sdk/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/bin/ld.lld")
-        },
-    });
+    libcranny.libc_file = b.path(libc_path);
 
     const install_options = std.Build.Step.InstallArtifact.Options{ .dest_dir = .{ .override = .{ .custom = "lib/armeabi-v7a" } } };
-
-    const libcranny = buildLib(b, target, "cranny");
     const libcranny_install = b.addInstallArtifact(libcranny, install_options);
 
-    const libcheck = buildLib(b, target, "cranny");
+    const libcheck = libcranny;
     const check = b.step("check", "Step for zls build-on-save feature");
     check.dependOn(&libcheck.step);
 
     // entrypoint is used for manual dlopen of libcranny to get the error message
-    const libentrypoint = buildLib(b, target, "entrypoint");
+    const entrypoint_module = b.createModule(.{
+        .root_source_file = b.path("entrypoint.zig"),
+        .target = android_module.resolved_target,
+        .optimize = .ReleaseSmall,
+        .link_libc = true,
+        .pic = true,
+        .strip = false,
+    });
+
+    entrypoint_module.addLibraryPath(std.Build.LazyPath{
+        .cwd_relative = std.fmt.comptimePrint("{s}/platforms/android-{s}/arch-arm/usr/lib", .{ ndk_path, api_level }),
+    });
+
+    entrypoint_module.addIncludePath(std.Build.LazyPath{ .cwd_relative = ndk_path ++ "/sysroot/usr/include" });
+
+    entrypoint_module.linkSystemLibrary("log", .{});
+    entrypoint_module.linkSystemLibrary("android", .{});
+
+    const libentrypoint = b.addLibrary(.{
+        .name = "entrypoint",
+        .linkage = .dynamic,
+        .root_module = android_module,
+        // .use_llvm = true,
+    });
+    libentrypoint.libc_file = b.path(libc_path);
     const libentrypoint_install = b.addInstallArtifact(libentrypoint, install_options);
+
+    const client = b.createModule(.{
+        .root_source_file = b.path("client.zig"),
+        .target = android_module.resolved_target,
+        .optimize = .Debug,
+        .link_libc = true,
+    });
+
+    const client_install = b.addExecutable(.{
+        .name = "client",
+        .root_module = client,
+        // .use_llvm = true,
+    });
+    b.installArtifact(client_install);
 
     // -=-=-=- Keystore generation -=-=-=-
     // this will be generated in the current directory
