@@ -72,23 +72,21 @@ pub fn build(b: *std.Build) !void {
     const libentrypoint = b.addLibrary(.{
         .name = "entrypoint",
         .linkage = .dynamic,
-        .root_module = android_module,
+        .root_module = entrypoint_module,
         // .use_llvm = true,
     });
     libentrypoint.libc_file = b.path(libc_path);
     const libentrypoint_install = b.addInstallArtifact(libentrypoint, install_options);
 
-    const client = b.createModule(.{
-        .root_source_file = b.path("client.zig"),
-        .target = android_module.resolved_target,
-        .optimize = .Debug,
-        .link_libc = true,
-    });
-
     const client_install = b.addExecutable(.{
         .name = "client",
-        .root_module = client,
-        // .use_llvm = true,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("client.zig"),
+            .target = b.resolveTargetQuery(.{ .cpu_arch = .x86_64, .os_tag = .linux }),
+            .optimize = .Debug,
+            .link_libc = true,
+        }),
+        .use_llvm = true,
     });
     b.installArtifact(client_install);
 
@@ -169,6 +167,7 @@ pub fn build(b: *std.Build) !void {
     install_step.dependOn(&libentrypoint_install.step);
 
     const run_step = b.step("run", "Run app");
+    run_step.dependOn(&client_install.step);
     run_step.dependOn(&run_app.step);
 
     const uninstall_step = b.step("uninstall-app", "Uninstall app");
