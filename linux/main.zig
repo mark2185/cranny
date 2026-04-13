@@ -57,6 +57,22 @@ fn handleRequest(request: *std.http.Server.Request) void {
         };
 
         file_writer.interface.flush() catch unreachable;
+
+        // std.debug.print("Starting data now!", .{});
+        // var total_read: usize = 0;
+        // var buffer: [128]u8 = undefined;
+        // while (true) {
+        // const read_bytes = reader.readSliceShort(&buffer) catch {
+        // @panic("Error reading short slice");
+        // };
+
+        // total_read += read_bytes;
+
+        // if (read_bytes < buffer.len) {
+        // std.debug.print("Reached the end of the file!\n", .{});
+        // break;
+        // }
+        // }
     }
 }
 

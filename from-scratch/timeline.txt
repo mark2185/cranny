@@ -1,0 +1,84 @@
+✔ build and launch an app with no JVM code @done (2026-03-20 10:43)
+✔ make logging work @done (2026-03-20 11:49)
+  ✔ C logging @done (2026-03-20 14:22)
+✔ pass control over to zig @done (2026-03-21 08:47)
+✔ why does build-lib produce a .o, but a build-obj produces a .so @done (2026-03-24 23:08)
+  ✔ -rdynamic is not -dynamic @done (2026-03-24 23:08)
+✔ how to call things from a different library when launching an app, it throws a missing symbol error @done (2026-03-20 14:22)
+  ✔ missing -L during compilation  @done (2026-03-20 14:22)
+✔ create a HTTP server that can be curl'd @done (2026-03-20 22:25)
+☐ make a list of all compiler/linker flags and explain every single one
+☐ investigate bionic_libc and how libc plays a role in zig
+  ☐ using an allocator is out of the picture
+  ☐ AndroidRuntime: java.lang.UnsatisfiedLinkError: Unable to load native library "/data/app/com.manual.apk-1/lib/arm/libcranny.so": dlopen failed: unknown reloc type 17 @ 0xe4a18324 (320)
+  ☐ this also happens when anything other than ReleaseSmall is used
+✔ avoid C, use only zig @done (2026-03-25 16:29)
+  ✔ fake symbols you can't actually link because of libc @done (2026-03-25 16:29) libc is in play now
+✔ hook into the android app lifecycle @done (2026-03-24 22:44)
+  ✔ start the server in onForeground @done (2026-03-24 22:44)
+  ✔ stop  the server in onBackground @done (2026-03-24 22:44)
+  ✔ make the server non blocking, even with .reuse_address and .force_blocking it's still throwing a "WouldBlock" error @done (2026-03-24 22:53) - the WouldBlock is ignored
+✘ ActivityManager: Activity pause timeout for ActivityRecord{bd7c580 u0 com.manual.apk/android.app.NativeActivity t179} @cancelled (2026-03-24 23:08)
+  ✘ zig_main must not block to avoid this timeout @cancelled (2026-03-24 23:08)
+  ✘ investigate if callbacks can be blocking if not using android_native_app_glue but instead instantiate ANativeActivity @cancelled (2026-03-24 23:08)
+✔ save a random file into storage @done (2026-03-25 11:29)
+
+API:
+✔ /list @done (2026-03-25 22:46)
+  ✔ create a list of all the files in the dir @done (2026-03-25 22:46)
+  ✔ return it delimited by '\n' @done (2026-03-25 22:46)
+☐ /upload
+  ☐ read the entire body
+  ☐ store as file in external storage of the app
+☐ /delete
+  ☐ maybe
+
+
+- have a working version on desktop (linux/main.zig)
+- try the same on xiaomi, it hangs when the buffer gets full
+- managed to get ADB access on the nook!
+- it loads up the native activity with NDK 16
+- logcat doesn't have color, dlopen fails due to the missing accept4 symbol
+    - only visible after a manual dlopen and dlerror because logcat doesn't show the reason for dlopen failure from java
+
+- other missing symbols:
+    - openat64
+    - pwritev64
+    - preadv64
+    - sendfile64
+    - __tls_get_addr when building in Debug mode (apparently this isn't something to be fixed)
+
+- back to the server hanging when the buffer gets filled, debugging back on phone maybe?
+- rewriting the Makefile into zig
+- making the build.zig work for armv8 to see if there's a hang there
+    - cancel that, because of realoc failures decided to just test on the nook
+- implement proper C shims for the previously mentioned missing symbols, namely pwritev64, it gets invoked 1k+ times
+- see if it all works on aarch64 first
+    - use the latest NDK
+    - latest build tools
+    - just write the request to a file
+    - it does not work on aarch64, integer overflow
+    - have a version that builds both for x86 and android without modifications for easier debugging
+    - idea: arm VM to remove android from the equation
+        - new idea: rpi
+        - unfortunately it works there, so it looks like it's android specific
+        - building zig 0.16 to see if that helps, but it segfaults during linking
+            - building on a different machine now
+            - same linking crash
+            - lld21 was missing
+            - command to build: cmake -S . -B build-latest -GNinja -DCMAKE_BUILD_TYPE=Release -DZIG_PIE=ON -DZIG_SHARED_LLVM=ON -DCMAKE_PREFIX_PATH=/usr/lib/llvm21
+        - cimport error on newest zig version, bug reported: https://codeberg.org/ziglang/translate-c/issues/315
+        - it's actually an arocc regression, bug reported: https://github.com/Vexu/arocc/issues/989
+            - now propagating back to zig (hardcoded just that change in zig itself because arocc is embedded in it)
+- it does, using zig-trunk! (linux/experiment.zig)
+- porting cranny.zig to zig-trunk
+- __tls_get_addr doesn't exist on android 4.4.2, but zig-trunk apparently needs it
+    - looking into the Io.Threaded, maybe some other doesn't use thread-local storage
+    - missing symbols: __tls_get_storage, dl_iterate_phdr, mmap64...
+    - also reloc type 17
+- nostd version maybe?
+    - libc implementation it is, because I don't feel like implementing sockets from scratch
+    - missing symbol htons (easy to implement)
+    - std.Thread introduces the __tls_get_addr, maybe pthread doesn't
+    - indeed it does not, continuing with "pure C" socket implementation, from zig
+        - works, onwards to writing the blogpost

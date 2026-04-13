@@ -1,6 +1,7 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
-const pkg_name = "com.manual.apk";
+const pkg_name = "com.cranny.zig";
 
 const android_sdk_path = "/opt/android-sdk";
 const ndk_version = "16.1.4479499";
@@ -14,11 +15,11 @@ const ndk_path = android_sdk_path ++ "/ndk/" ++ ndk_version;
 const api_level = "19";
 const android_jar_path = android_sdk_path ++ "/platforms/android-" ++ api_level ++ "/android.jar";
 
-const apk_name = "temp.apk";
+const apk_name = "cranny.apk";
 
 pub fn build(b: *std.Build) !void {
     const android_module = b.createModule(.{
-        .root_source_file = b.path("cranny-no-std.zig"),
+        .root_source_file = b.path("cranny.zig"),
         .target = b.resolveTargetQuery(.{ .cpu_arch = .arm, .os_tag = .linux, .abi = .androideabi }),
         .optimize = .ReleaseSmall,
         .link_libc = true,
@@ -78,18 +79,6 @@ pub fn build(b: *std.Build) !void {
     libentrypoint.libc_file = b.path(libc_path);
     const libentrypoint_install = b.addInstallArtifact(libentrypoint, install_options);
 
-    const client_install = b.addExecutable(.{
-        .name = "client",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("client.zig"),
-            .target = b.resolveTargetQuery(.{ .cpu_arch = .x86_64, .os_tag = .linux }),
-            .optimize = .Debug,
-            .link_libc = true,
-        }),
-        .use_llvm = true,
-    });
-    b.installArtifact(client_install);
-
     // -=-=-=- Keystore generation -=-=-=-
     // this will be generated in the current directory
     // so it doesn't get regenerated every time you do a clean build
@@ -107,8 +96,6 @@ pub fn build(b: *std.Build) !void {
         "-dname", "CN=example.com, OU=ID, O=Example, L=Doe, S=John, C=GB",
     });
 
-    gen_keystore.step.dependOn(&libcranny_install.step);
-
     // -=-=-=- Packaging -=-=-=-
     const package_apk = b.addSystemCommand(&.{
         build_tools_path ++ "/aapt",
@@ -117,7 +104,7 @@ pub fn build(b: *std.Build) !void {
         "-f", // force overwriting files
         "-I", android_jar_path, // add an existing package to base include set
         "-M", "AndroidManifest.xml", // path to the AndroidManifest.xml
-        "-F", "zig-out/temp.apk", // output file
+        "-F", "zig-out/cranny.apk", // output file
     });
 
     package_apk.step.dependOn(&libcranny_install.step);
@@ -127,12 +114,13 @@ pub fn build(b: *std.Build) !void {
     const zip_libs = b.addSystemCommand(&.{
         "sh", "-c",
         // has to be this way to have the correct filepaths, i.e. lib/<arch>/*.so
-        "cd zig-out && " ++ build_tools_path ++ "/aapt add temp.apk lib/armeabi-v7a/lib*.so",
+        "cd zig-out && " ++ build_tools_path ++ "/aapt add " ++ apk_name ++ " lib/armeabi-v7a/lib*.so",
     });
 
     zip_libs.step.dependOn(&package_apk.step);
 
     // -=-=-=- Zip alignment -=-=-=-
+    // it's optional, do note that it generates a new APK
     // const zipalign = b.addSystemCommand(&.{
         // build_tools_path ++ "/zipalign",
         // "-v", "4",
@@ -153,10 +141,16 @@ pub fn build(b: *std.Build) !void {
     });
 
     sign_apk.step.dependOn(&zip_libs.step);
-    // generate the keystore only if it doesn't exist
-    {
-        var threaded = std.Io.Threaded.init_single_threaded;
-        _ = std.Io.Dir.cwd().openFile( threaded.io(), keystore, .{}) catch {
+    // generate the keystore only if it doesn't already exist
+    if (builtin.zig_version.minor == 15) {
+        _ = std.fs.cwd().openFile(keystore, .{}) catch {
+            sign_apk.step.dependOn(&gen_keystore.step);
+        };
+    } else {
+        var threaded: std.Io.Threaded = .init_single_threaded;
+        defer threaded.deinit();
+
+        _ = std.Io.Dir.cwd().openFile(threaded.io(), keystore, .{}) catch {
             sign_apk.step.dependOn(&gen_keystore.step);
         };
     }
@@ -172,9 +166,9 @@ pub fn build(b: *std.Build) !void {
     const install_step = b.getInstallStep();
     install_step.dependOn(&libcranny_install.step);
     install_step.dependOn(&libentrypoint_install.step);
+    install_step.dependOn(&sign_apk.step);
 
     const run_step = b.step("run", "Run app");
-    run_step.dependOn(&client_install.step);
     run_step.dependOn(&run_app.step);
 
     const uninstall_step = b.step("uninstall-app", "Uninstall app");

@@ -1,0 +1,4 @@
+{
+    "zig_exe_path": "/usr/bin/zig",
+    "enable_build_on_save": true
+}

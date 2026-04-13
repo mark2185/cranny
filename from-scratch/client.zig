@@ -44,7 +44,7 @@ pub fn main(init: process.Init) void {
                 break :blk i + 1;
             }
         }
-        unreachable;
+        break :blk 0;
     };
 
     mem.copyForwards(u8, &buffer, filename[i..]);

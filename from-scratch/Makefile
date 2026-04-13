@@ -61,7 +61,8 @@ ${BUILD_DIR}/${APKFILE}: AndroidManifest.xml ${KEYSTORE_FILE} ${BUILD_DIR}/lib/a
 	@# -F = output file
 	${AAPT} package -v -I ${ANDROID_JAR} -M AndroidManifest.xml -f -F ${BUILD_DIR}/temp.apk
 
-	cd ${BUILD_DIR} && zip temp.apk -D lib/*/*.so
+	@# cd ${BUILD_DIR} && zip temp.apk -r build -D lib/*/*.so
+	zip temp.apk -r build -D lib/*/*.so
 
 	@# zipalign gets angry if the apk already exists
 	@rm -f ${BUILD_DIR}/${APKFILE}
