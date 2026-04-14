@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const pkg_name = "com.manual.apk";
+const pkg_name = "com.cranny.zig";
 
 const android_sdk_path = "/opt/android-sdk";
 const ndk_version = "16.1.4479499";
@@ -8,18 +8,23 @@ const build_tools_version = "36.0.0";
 const build_tools_path = android_sdk_path ++ "/build-tools/" ++ build_tools_version;
 const adb_path = android_sdk_path ++ "/platform-tools/adb";
 
-const libc_path = "libc_android16.txt";
+const libc_path = "src/libc_android16.txt";
 const ndk_path = android_sdk_path ++ "/ndk/" ++ ndk_version;
 
 const api_level = "19";
 const android_jar_path = android_sdk_path ++ "/platforms/android-" ++ api_level ++ "/android.jar";
 
-const apk_name = "temp.apk";
+const apk_name = "cranny.apk";
 
 pub fn build(b: *std.Build) !void {
     const android_module = b.createModule(.{
-        .root_source_file = b.path("cranny-no-std.zig"),
-        .target = b.resolveTargetQuery(.{ .cpu_arch = .arm, .os_tag = .linux, .abi = .androideabi }),
+        .root_source_file = b.path("src/cranny.zig"),
+        .target = b.resolveTargetQuery(.{
+            .cpu_arch = .arm,
+            .os_tag = .linux,
+            .abi = .androideabi,
+            .android_api_level = 19,
+        }),
         .optimize = .ReleaseSmall,
         .link_libc = true,
         .pic = true,
@@ -39,7 +44,6 @@ pub fn build(b: *std.Build) !void {
         .name = "cranny",
         .linkage = .dynamic,
         .root_module = android_module,
-        // .use_llvm = true,
     });
     libcranny.libc_file = b.path(libc_path);
 
@@ -52,7 +56,7 @@ pub fn build(b: *std.Build) !void {
 
     // entrypoint is used for manual dlopen of libcranny to get the error message
     const entrypoint_module = b.createModule(.{
-        .root_source_file = b.path("entrypoint.zig"),
+        .root_source_file = b.path("src/entrypoint.zig"),
         .target = android_module.resolved_target,
         .optimize = .ReleaseSmall,
         .link_libc = true,
@@ -81,7 +85,7 @@ pub fn build(b: *std.Build) !void {
     const client_install = b.addExecutable(.{
         .name = "client",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("client.zig"),
+            .root_source_file = b.path("src/client.zig"),
             .target = b.resolveTargetQuery(.{ .cpu_arch = .x86_64, .os_tag = .linux }),
             .optimize = .Debug,
             .link_libc = true,
@@ -133,15 +137,15 @@ pub fn build(b: *std.Build) !void {
     zip_libs.step.dependOn(&package_apk.step);
 
     // -=-=-=- Zip alignment -=-=-=-
-    // const zipalign = b.addSystemCommand(&.{
-        // build_tools_path ++ "/zipalign",
-        // "-v", "4",
-        // "-f",
-        // "zig-out/temp.apk",
-        // "zig-out/" ++ apk_name,
-    // });
+    const zipalign = b.addSystemCommand(&.{
+        build_tools_path ++ "/zipalign",
+        "-v", "4",
+        "-f",
+        "zig-out/temp.apk",
+        "zig-out/" ++ apk_name,
+    });
 
-    // zipalign.step.dependOn(&zip_libs.step);
+    zipalign.step.dependOn(&zip_libs.step);
 
     // -=-=-=- Signing -=-=-=-
     const sign_apk = b.addSystemCommand(&.{
@@ -152,14 +156,15 @@ pub fn build(b: *std.Build) !void {
         "zig-out/" ++ apk_name,
     });
 
-    sign_apk.step.dependOn(&zip_libs.step);
+    sign_apk.step.dependOn(&zipalign.step);
+
     // generate the keystore only if it doesn't exist
-    {
-        var threaded = std.Io.Threaded.init_single_threaded;
-        _ = std.Io.Dir.cwd().openFile( threaded.io(), keystore, .{}) catch {
-            sign_apk.step.dependOn(&gen_keystore.step);
-        };
-    }
+    // {
+        // var threaded = std.Io.Threaded.init_single_threaded;
+        // _ = std.Io.Dir.cwd().openFile( threaded.io(), keystore, .{}) catch {
+            // sign_apk.step.dependOn(&gen_keystore.step);
+        // };
+    // }
 
     const install_apk = b.addSystemCommand(&.{ adb_path, "install", "-r", "zig-out/" ++ apk_name });
     install_apk.step.dependOn(&sign_apk.step);
@@ -172,6 +177,7 @@ pub fn build(b: *std.Build) !void {
     const install_step = b.getInstallStep();
     install_step.dependOn(&libcranny_install.step);
     install_step.dependOn(&libentrypoint_install.step);
+    install_step.dependOn(&sign_apk.step);
 
     const run_step = b.step("run", "Run app");
     run_step.dependOn(&client_install.step);

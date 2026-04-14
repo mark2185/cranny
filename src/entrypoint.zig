@@ -11,7 +11,7 @@ const android_log = @cImport({
 });
 
 fn LOGI(text: [*c]const u8) void {
-    _ = android_log.__android_log_write(4, "MANUAL_TAG_ZIG", text);
+    _ = android_log.__android_log_write(4, "COM_CRANNY_ZIG", text);
 }
 
 const native_activity = @cImport({
@@ -24,7 +24,7 @@ fn entrypoint(_: [*c]native_activity.ANativeActivity, _: *anyopaque, _: usize) c
     LOGI("+entrypoint()");
     defer LOGI("-entrypoint()");
 
-    const locations: []const [*c]const u8 = &.{ "/data/app-lib/com.manual.apk-1/libcranny.so", "/data/app-lib/com.manual.apk-2/libcranny.so" };
+    const locations: []const [*c]const u8 = &.{ "/data/app-lib/com.cranny.zig-1/libcranny.so", "/data/app-lib/com.cranny.zig-2/libcranny.so" };
     for (locations) |loc| {
         _ = dlfcn.dlopen(loc, dlfcn.RTLD_NOW);
         const err = dlfcn.dlerror();

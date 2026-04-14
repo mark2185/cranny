@@ -20,7 +20,7 @@ const c = @cImport({
 const mem = @import("std").mem;
 
 fn LOGI(text: [*c]const u8) void {
-    _ = android.__android_log_write(4, "MANUAL_TAG_ZIG", text);
+    _ = android.__android_log_write(4, "COM_CRANNY_ZIG", text);
 }
 
 fn LOGFI(text: [*c]const u8, ...) callconv(.c) void {
