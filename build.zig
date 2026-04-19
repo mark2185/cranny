@@ -121,6 +121,7 @@ pub fn build(b: *std.Build) !void {
         "-f", // force overwriting files
         "-I", android_jar_path, // add an existing package to base include set
         "-M", "AndroidManifest.xml", // path to the AndroidManifest.xml
+        "-S", "res/",
         "-F", "zig-out/temp.apk", // output file
     });
 
