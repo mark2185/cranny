@@ -19,6 +19,7 @@ const mem = @import("std").mem;
 pub fn main(init: process.Init) void {
     var args_it = init.minimal.args.iterate();
     _ = args_it.next().?; // executable name
+    const device_address = args_it.next().?;
     const filename = args_it.next().?;
 
     print("Filename: '{s}' ({any})\n", .{ filename, @TypeOf(filename) });
@@ -54,12 +55,10 @@ pub fn main(init: process.Init) void {
 
     print("Socket created!\n", .{});
 
-    // 192.168.1.41 in hex
-    // 0xc0a80229,
     var server_address = socket.sockaddr_in{};
     server_address.sin_family = socket.AF_INET;
     server_address.sin_port = socket.htons(7979);
-    const res = socket.inet_pton(socket.AF_INET, "192.168.1.41", &server_address.sin_addr);
+    const res = socket.inet_pton(socket.AF_INET, device_address, &server_address.sin_addr);
     if (res == -1) {
         print("Inet pton failed", .{});
         return;
